@@ -1,10 +1,10 @@
-// @ts-nocheck
-// Preventing TS checks with files presented in the video for a better presentation.
+// lib/.server/llm/stream-text.ts
 import { streamText as _streamText, convertToCoreMessages } from 'ai';
-import { getModel } from '~/lib/.server/llm/model';
+import { getModel, getBedrockModel } from '~/lib/.server/llm/model';
 import { MAX_TOKENS, MAX_TOKENS_BEDROCK } from './constants';
 import { getSystemPrompt } from './prompts';
 import { MODEL_LIST, DEFAULT_MODEL, DEFAULT_PROVIDER } from '~/utils/constants';
+import { getAPIKey, getAWSCredentials } from '~/lib/.server/llm/api-key'; // getAPIKeyとgetAWSCredentialsをインポート
 
 interface ToolResult<Name extends string, Args, Result> {
   toolCallId: string;
@@ -17,7 +17,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   toolInvocations?: ToolResult<string, unknown, unknown>[];
-  model?: string;
+  model?: string; // Add optional model property
 }
 
 export type Messages = Message[];
@@ -52,10 +52,27 @@ export function streamText(messages: Messages, env: Env, options?: StreamingOpti
   });
 
   const provider = MODEL_LIST.find((model) => model.name === currentModel)?.provider || DEFAULT_PROVIDER;
+
+  const apiKey = getAPIKey(env, provider); // APIキーを取得
+  const awsCreds = provider === 'Bedrock' ? getAWSCredentials() : null; // Bedrockの場合のみAWS認証情報を取得
+
+  let modelSelection = getModel(provider, currentModel, env); // Default model selection
+
+  if (provider === 'Bedrock' && !apiKey && awsCreds) {
+    // APIキーがなく、AWS認証情報がある場合、AWS認証情報を使用
+    modelSelection = getBedrockModel('anthropic.claude-v2', awsCreds); // awsCredsを渡す
+  } else if (provider === 'Bedrock' && apiKey) {
+    // APIキーがある場合は、それを使用 (Gemini)
+    modelSelection = getModel(provider, currentModel, env); //
+  } else if (provider !== 'Ollama' && !apiKey) {
+    // Ollama以外のプロバイダーでAPIキーがない場合はエラー
+    throw new Error(`API key is required for ${provider}`);
+  }
+
   const maxTokens = provider === 'Bedrock' ? MAX_TOKENS_BEDROCK : MAX_TOKENS;
 
   return _streamText({
-    model: getModel(provider, currentModel, env),
+    model: modelSelection,
     system: getSystemPrompt(),
     maxTokens,
     messages: convertToCoreMessages(processedMessages),
