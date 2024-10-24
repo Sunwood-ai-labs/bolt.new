@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: makisunwood/bolt:v0.3.6
+    ports:
+      - "8788:8788"
+      - "5173:5173"
+    # volumes:
+    #   - .:/app
+      # - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    command: pnpm run dev
