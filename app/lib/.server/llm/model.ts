@@ -50,6 +50,10 @@ export function getBedrockModel(modelId: string, credentials: any) {
     region: credentials.region,
     accessKeyId: credentials.accessKeyId,
     secretAccessKey: credentials.secretAccessKey,
+    // bedrockOptions: {
+    //   region: 'us-east-1',
+    //   // 認証情報を明示的に指定しない場合、AWS SDKは自動的にIAMロールを使用します
+    // },
   });
 
   return bedrock(modelId);
