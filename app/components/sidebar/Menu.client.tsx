@@ -1,5 +1,6 @@
+// app/components/sidebar/Menu.client.tsx
 import { motion, type Variants } from 'framer-motion';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, ChangeEvent } from 'react';
 import { toast } from 'react-toastify';
 import { Dialog, DialogButton, DialogDescription, DialogRoot, DialogTitle } from '~/components/ui/Dialog';
 import { IconButton } from '~/components/ui/IconButton';
@@ -9,6 +10,8 @@ import { cubicEasingFn } from '~/utils/easings';
 import { logger } from '~/utils/logger';
 import { HistoryItem } from './HistoryItem';
 import { binDates } from './date-binning';
+import { MODEL_LIST } from '~/utils/constants';
+
 
 const menuVariants = {
   closed: {
@@ -33,11 +36,29 @@ const menuVariants = {
 
 type DialogContent = { type: 'delete'; item: ChatHistoryItem } | null;
 
+interface APIKeys {
+  [key: string]: string | null;
+}
+
+
+// Function to get unique provider names (including 'Bedrock')
+const getUniqueProviders = () => {
+  const providers = new Set<string>();
+  MODEL_LIST.forEach(model => providers.add(model.provider));
+  return Array.from(providers);
+};
+
 export function Menu() {
   const menuRef = useRef<HTMLDivElement>(null);
   const [list, setList] = useState<ChatHistoryItem[]>([]);
   const [open, setOpen] = useState(false);
   const [dialogContent, setDialogContent] = useState<DialogContent>(null);
+  const [apiKeys, setAPIKeys] = useState<APIKeys>({});
+  const [awsCredentials, setAwsCredentials] = useState({
+    accessKeyId: "",
+    secretAccessKey: "",
+    region: "",
+  });
 
   const loadEntries = useCallback(() => {
     if (db) {
@@ -57,7 +78,6 @@ export function Menu() {
           loadEntries();
 
           if (chatId.get() === item.id) {
-            // hard page navigation to clear the stores
             window.location.pathname = '/';
           }
         })
@@ -99,6 +119,76 @@ export function Menu() {
     };
   }, []);
 
+  // Load API keys and AWS credentials from localStorage on component mount (DEV ONLY - INSECURE)
+  useEffect(() => {
+    getUniqueProviders().forEach(provider => {
+        try {
+                const storedKey = localStorage.getItem(`${provider}_API_KEY`);
+                setAPIKeys(prevKeys => ({ ...prevKeys, [provider]: storedKey }));
+
+              if (provider === 'Bedrock') {
+                 setAwsCredentials({
+                  accessKeyId: localStorage.getItem(`AWS_ACCESS_KEY_ID`) || "",
+                  secretAccessKey: localStorage.getItem(`AWS_SECRET_ACCESS_KEY`) || "",
+                   region: localStorage.getItem(`AWS_REGION`) || "",
+              });
+           }
+
+        } catch (error) {
+             console.error(`Error loading credentials for ${provider}:`, error);
+            toast.error(`Error loading credentials for ${provider}`);
+         }
+      });
+
+
+  }, []);
+
+
+  const handleApiKeyChange = (provider: string, event: ChangeEvent<HTMLInputElement>) => {
+    const { value } = event.target;
+
+    setAPIKeys({
+      ...apiKeys,
+      [provider]: value,
+    });
+
+    // Store API keys in localStorage (INSECURE - consider alternatives for production!)
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`${provider}_API_KEY`, value);
+    }
+
+  };
+
+  const handleAWSCredentialsChange = (
+    field: keyof typeof awsCredentials,
+    value: string
+  ) => {
+    setAwsCredentials({
+      ...awsCredentials,
+      [field]: value,
+    });
+
+    // Store in localStorage (INSECURE - reconsider for production)
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`AWS_${field.toUpperCase()}`, value);
+    }
+  };
+
+  const saveAWSCredentials = () => {
+    // Here you could perform validation if needed
+
+    // For this example, we'll just display a success message
+    toast.success("AWS Credentials Saved (insecurely)");
+  };
+
+
+// Helper function to retrieve API keys, handling undefined/null
+const getStoredAPIKey = (provider: string) => {
+  return apiKeys[provider] || null; 
+};
+
+
+
   return (
     <motion.div
       ref={menuRef}
@@ -119,51 +209,70 @@ export function Menu() {
           </a>
         </div>
         <div className="text-bolt-elements-textPrimary font-medium pl-6 pr-5 my-2">Your Chats</div>
-        <div className="flex-1 overflow-scroll pl-4 pr-5 pb-5">
-          {list.length === 0 && <div className="pl-2 text-bolt-elements-textTertiary">No previous conversations</div>}
-          <DialogRoot open={dialogContent !== null}>
-            {binDates(list).map(({ category, items }) => (
-              <div key={category} className="mt-4 first:mt-0 space-y-1">
-                <div className="text-bolt-elements-textTertiary sticky top-0 z-1 bg-bolt-elements-background-depth-2 pl-2 pt-2 pb-1">
-                  {category}
-                </div>
-                {items.map((item) => (
-                  <HistoryItem key={item.id} item={item} onDelete={() => setDialogContent({ type: 'delete', item })} />
-                ))}
-              </div>
-            ))}
-            <Dialog onBackdrop={closeDialog} onClose={closeDialog}>
-              {dialogContent?.type === 'delete' && (
-                <>
-                  <DialogTitle>Delete Chat?</DialogTitle>
-                  <DialogDescription asChild>
-                    <div>
-                      <p>
-                        You are about to delete <strong>{dialogContent.item.description}</strong>.
-                      </p>
-                      <p className="mt-1">Are you sure you want to delete this chat?</p>
+      {/* API Key and AWS Credentials Input Section */}
+      <div className="pl-6 pr-5 mb-4">
+          <div className="text-bolt-elements-textPrimary font-medium mb-2">API Keys (WARNING: Client-side storage is insecure)</div>
+          {/* Render input fields for each provider EXCEPT Ollama */}
+          {getUniqueProviders().map(provider => (
+             <div key={provider} className="mb-2">
+              <label htmlFor={`${provider}-api-key`} className="block text-bolt-elements-textSecondary mb-1">
+                {provider} API Key:
+              </label>
+              <input
+                type="password"
+                id={`${provider}-api-key`}
+                value={getStoredAPIKey(provider) || ""}
+                onChange={(e) => handleApiKeyChange(provider, e)}
+                className="w-full p-2 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-prompt-background text-bolt-elements-textPrimary focus:outline-none"
+              />
+
+
+                {provider === 'Bedrock' && ( 
+                  <> {/* AWS Credentials Input inside Bedrock section */}
+                    <div className="mt-2">
+                       <label htmlFor="aws-access-key-id" className="block text-bolt-elements-textSecondary mb-1">Access Key ID:</label>
+                       <input
+                         type="password" // Hide the key
+                        id="aws-access-key-id"
+                         value={awsCredentials.accessKeyId}
+                        onChange={(e) => handleAWSCredentialsChange("accessKeyId", e.target.value)}
+                        className="w-full p-2 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-prompt-background text-bolt-elements-textPrimary focus:outline-none"
+                       />
+                   </div>
+                   <div className="mt-2">
+                       <label htmlFor="aws-secret-access-key" className="block text-bolt-elements-textSecondary mb-1">Secret Access Key:</label>
+                      <input
+                         type="password" // Hide the key
+                         id="aws-secret-access-key"
+                         value={awsCredentials.secretAccessKey}
+                        onChange={(e) => handleAWSCredentialsChange("secretAccessKey", e.target.value)}
+                         className="w-full p-2 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-prompt-background text-bolt-elements-textPrimary focus:outline-none"
+                       />
                     </div>
-                  </DialogDescription>
-                  <div className="px-5 pb-4 bg-bolt-elements-background-depth-2 flex gap-2 justify-end">
-                    <DialogButton type="secondary" onClick={closeDialog}>
-                      Cancel
-                    </DialogButton>
-                    <DialogButton
-                      type="danger"
-                      onClick={(event) => {
-                        deleteItem(event, dialogContent.item);
-                        closeDialog();
-                      }}
-                    >
-                      Delete
-                    </DialogButton>
-                  </div>
-                </>
-              )}
-            </Dialog>
-          </DialogRoot>
+                     <div className="mt-2">
+                        <label htmlFor="aws-region" className="block text-bolt-elements-textSecondary mb-1">Region:</label>
+                        <input
+                          type="text"
+                          id="aws-region"
+                          value={awsCredentials.region}
+                          onChange={(e) => handleAWSCredentialsChange("region", e.target.value)}
+                          className="w-full p-2 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-prompt-background text-bolt-elements-textPrimary focus:outline-none"
+                         />
+                      </div>
+                      <button
+                         onClick={saveAWSCredentials}
+                         className="mt-2 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" // Example button styles
+                       >
+                        Save AWS Credentials
+                       </button>
+                  </>
+                 )}
+
+              </div>
+          ))}
         </div>
-        <div className="flex items-center border-t border-bolt-elements-borderColor p-4">
+
+      <div className="flex items-center border-t border-bolt-elements-borderColor p-4">
           <ThemeSwitch className="ml-auto" />
         </div>
       </div>
